@@ -249,10 +249,22 @@ function drawOrb(timeMs) {
 
 // ---- voice ---------------------------------------------------------------
 
-const speaker = new Voice.Speaker((speaking) => {
-  if (speaking) setMode("speaking");
-  else if (state.mode === "speaking") afterReply();
+const speaker = new Voice.Speaker({
+  synthesize: (text, voiceId) => api.synthesize(text, voiceId),
+  onSpeakingChange: (speaking) => {
+    if (speaking) setMode("speaking");
+    else if (state.mode === "speaking") afterReply();
+  },
+  onError: (error) =>
+    addMessage("notice", `The built-in voice isn't available (${error.message}). Using the system voice for now.`),
 });
+
+/** Load the neural voice in the background so the first reply isn't delayed. */
+function warmUpVoice() {
+  if (state.settings.speakReplies && state.settings.voice.startsWith("neural:")) {
+    api.loadVoice().catch(() => {}); // a failure is reported when speech is attempted
+  }
+}
 
 const mic = new Voice.Microphone({
   onLevel: (level) => (state.level = level),
@@ -495,7 +507,7 @@ function applyState(next) {
   $("wakeLabel").textContent = `Listen for “${name}”`;
   $("wakeToggle").checked = state.settings.wakeWordEnabled;
   $("speakToggle").checked = state.settings.speakReplies;
-  speaker.voiceName = state.settings.voiceName;
+  speaker.voice = state.settings.voice;
   renderTasks();
   renderMemories();
   updateHint();
@@ -503,18 +515,30 @@ function applyState(next) {
 
 function fillVoices() {
   const select = $("voiceSelect");
-  const options = [new Option("System default", "")];
-  for (const voice of speaker.voices()) options.push(new Option(`${voice.name} (${voice.lang})`, voice.name));
-  select.replaceChildren(...options);
-  select.value = state.settings.voiceName;
-  if (select.value !== state.settings.voiceName) select.value = "";
+  const neural = el("optgroup");
+  neural.label = "Built-in natural voices";
+  for (const voice of state.neuralVoices) neural.append(new Option(voice.label, `neural:${voice.id}`));
+  const system = el("optgroup");
+  system.label = "System voices";
+  system.append(new Option("System default", "system:"));
+  for (const voice of speaker.systemVoices()) {
+    system.append(new Option(`${voice.name} (${voice.lang})`, `system:${voice.name}`));
+  }
+  select.replaceChildren(neural, system);
+  select.value = state.settings.voice;
+  // The saved voice may no longer exist (a system voice was uninstalled).
+  if (select.value !== state.settings.voice) select.value = `neural:${state.neuralVoices[0].id}`;
 }
 
 function openSettings() {
   const s = state.settings;
   $("apiKeyInput").value = "";
   $("apiKeyInput").disabled = state.keyFromEnv;
-  $("apiKeyInput").placeholder = state.hasApiKey ? "Saved. Type a new key to replace it" : "sk-ant-…";
+  $("apiKeyInput").placeholder = state.keyFromEnv
+    ? "Set outside the app"
+    : state.hasApiKey
+      ? "Saved. Type a new key to replace it"
+      : "sk-ant-…";
   $("apiKeyNote").textContent = state.keyFromEnv
     ? "Using the key from the ANTHROPIC_API_KEY environment variable."
     : "Stored encrypted on this computer and sent only to Anthropic.";
@@ -539,7 +563,7 @@ $("settingsForm").addEventListener("submit", async (event) => {
       {
         assistantName: $("assistantNameInput").value,
         userName: $("userNameInput").value.trim(),
-        voiceName: $("voiceSelect").value,
+        voice: $("voiceSelect").value,
         calendarUrls: $("calendarInput").value.split("\n"),
         workspaceDir: $("workspaceInput").value,
       },
@@ -551,11 +575,23 @@ $("settingsForm").addEventListener("submit", async (event) => {
     return;
   }
   $("settingsDialog").close();
+  warmUpVoice();
   refreshAgenda();
   if (!messagesEl.querySelector(".msg")) showEmptyState();
 });
 
-$("settingsCancel").addEventListener("click", () => $("settingsDialog").close());
+$("settingsCancel").addEventListener("click", () => {
+  speaker.stop();
+  speaker.voice = state.settings.voice; // undo any preview
+  $("settingsDialog").close();
+});
+
+$("previewVoiceButton").addEventListener("click", () => {
+  speaker.stop();
+  speaker.voice = $("voiceSelect").value;
+  const name = $("assistantNameInput").value.trim() || state.settings.assistantName;
+  speaker.say(`Hello, I'm ${name}. This is how I sound.`);
+});
 $("settingsButton").addEventListener("click", openSettings);
 $("pickWorkspaceButton").addEventListener("click", async () => {
   const dir = await api.pickWorkspace();
@@ -590,6 +626,7 @@ $("wakeToggle").addEventListener("change", async (event) => {
 $("speakToggle").addEventListener("change", async (event) => {
   if (!event.target.checked) speaker.stop();
   await saveSettings({ speakReplies: event.target.checked });
+  warmUpVoice();
 });
 
 $("briefButton").addEventListener("click", () => submit("Give me my briefing for today.", false));
@@ -639,7 +676,14 @@ api.onReminder((task) => {
 api.onSpeechStatus((status) => {
   if (status.state === "loading") {
     updateHint(`Preparing speech recognition (one-time download)… ${status.progress ?? 0}%`);
+  } else {
+    updateHint();
   }
+});
+
+api.onVoiceStatus((status) => {
+  if (status.state === "loading") updateHint(`Preparing the voice (one-time download)… ${status.progress ?? 0}%`);
+  else updateHint();
 });
 
 // ---- start ---------------------------------------------------------------
@@ -654,6 +698,7 @@ api.onSpeechStatus((status) => {
   setInterval(renderTasks, 60_000); // keep "overdue" markers current
   if (typeof speechSynthesis !== "undefined") speechSynthesis.addEventListener("voiceschanged", fillVoices);
 
+  warmUpVoice();
   if (!state.hasApiKey) openSettings();
   if (state.settings.wakeWordEnabled && !(await startMic())) {
     await saveSettings({ wakeWordEnabled: false });

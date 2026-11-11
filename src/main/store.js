@@ -11,7 +11,9 @@ const DEFAULT_SETTINGS = {
   userName: "",
   wakeWordEnabled: false,
   speakReplies: true,
-  voiceName: "",
+  // "neural:<voice id>" for the built-in voice, "system:<name>" for an
+  // operating-system voice ("system:" alone is the system default).
+  voice: "neural:af_heart",
   calendarUrls: [],
   workspaceDir: "",
 };

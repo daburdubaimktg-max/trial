@@ -19,6 +19,9 @@ contextBridge.exposeInMainWorld("nova", {
   loadSpeech: () => ipcRenderer.invoke("stt:load"),
   transcribe: (samples) => ipcRenderer.invoke("stt:transcribe", samples),
 
+  loadVoice: () => ipcRenderer.invoke("tts:load"),
+  synthesize: (text, voice) => ipcRenderer.invoke("tts:synthesize", { text, voice }),
+
   setTaskDone: (id, done) => ipcRenderer.invoke("tasks:setDone", { id, done }),
   deleteTask: (id) => ipcRenderer.invoke("tasks:delete", id),
   deleteMemory: (id) => ipcRenderer.invoke("memory:delete", id),
@@ -28,4 +31,5 @@ contextBridge.exposeInMainWorld("nova", {
   onDataChanged: on("data:changed"),
   onReminder: on("reminder"),
   onSpeechStatus: on("stt:status"),
+  onVoiceStatus: on("tts:status"),
 });

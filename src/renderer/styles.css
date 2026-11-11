@@ -549,6 +549,10 @@ select {
   gap: 8px;
 }
 
+.row.tight .pill {
+  flex: none;
+}
+
 .error {
   color: var(--danger);
   font-size: 13px;

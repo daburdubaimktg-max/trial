@@ -2,19 +2,30 @@
 // touches the network or the file system. The interface (renderer) only
 // talks to it through the narrow API in preload.js.
 
-const { app, BrowserWindow, ipcMain, dialog, shell, safeStorage, session, Notification } = require("electron");
+const {
+  app,
+  BrowserWindow,
+  ipcMain,
+  dialog,
+  shell,
+  safeStorage,
+  session,
+  Notification,
+  utilityProcess,
+} = require("electron");
 const path = require("node:path");
 const { Store } = require("./store");
 const { createTools } = require("./tools");
 const { Agent } = require("./agent");
 const { SpeechToText } = require("./stt");
+const { NeuralVoice, VOICES } = require("./tts");
 const calendar = require("./calendar");
 
 const REMINDER_CHECK_MS = 20_000;
 
 /** @type {BrowserWindow | null} */
 let win = null;
-let store, agent, stt;
+let store, agent, stt, voice;
 
 function send(channel, payload) {
   if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
@@ -27,6 +38,7 @@ function snapshot() {
     keyFromEnv: Boolean(process.env.ANTHROPIC_API_KEY),
     tasks: store.getTasks(),
     memories: store.getMemories(),
+    neuralVoices: VOICES,
   };
 }
 
@@ -62,6 +74,11 @@ function setUp() {
   });
   agent = new Agent({ store, tools });
   stt = new SpeechToText(path.join(dataDir, "models"), (status) => send("stt:status", status));
+  voice = new NeuralVoice({
+    cacheDir: path.join(dataDir, "models"),
+    fork: (script, args) => utilityProcess.fork(script, args, { serviceName: "Voice engine" }),
+    onStatus: (status) => send("tts:status", status),
+  });
 }
 
 function createWindow() {
@@ -119,6 +136,9 @@ function registerIpc() {
   ipcMain.handle("stt:load", () => stt.load().then(() => true));
   ipcMain.handle("stt:transcribe", (_e, samples) => stt.transcribe(new Float32Array(samples)));
 
+  ipcMain.handle("tts:load", () => voice.load().then(() => true));
+  ipcMain.handle("tts:synthesize", (_e, { text, voice: voiceId }) => voice.synthesize(text, voiceId));
+
   ipcMain.handle("tasks:setDone", (_e, { id, done }) => {
     store.updateTask(id, { done: Boolean(done) });
     return snapshot();
@@ -173,6 +193,8 @@ app.whenReady().then(() => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 });
+
+app.on("will-quit", () => voice?.dispose());
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();

@@ -68,50 +68,131 @@ class Microphone {
   }
 }
 
+/**
+ * Speaks sentences one after another. Uses the built-in neural voice when
+ * the chosen voice starts with "neural:", otherwise an operating-system
+ * voice. If the neural voice fails, that sentence falls back to the system
+ * voice so a reply is never silently dropped.
+ */
 class Speaker {
-  /** @param {(speaking: boolean) => void} onSpeakingChange */
-  constructor(onSpeakingChange = () => {}) {
+  /**
+   * @param {object} deps
+   * @param {(speaking: boolean) => void} deps.onSpeakingChange
+   * @param {(text: string, voiceId: string) => Promise<{samples: Float32Array, sampleRate: number}>} deps.synthesize
+   * @param {(error: Error) => void} [deps.onError] called once per failure streak
+   */
+  constructor({ onSpeakingChange = () => {}, synthesize, onError = () => {} }) {
     this.onSpeakingChange = onSpeakingChange;
-    this.pending = 0;
-    this.generation = 0; // bumped by stop() so cancelled speech is ignored
-    this.voiceName = "";
-    this.available = typeof speechSynthesis !== "undefined";
+    this.synthesize = synthesize;
+    this.onError = onError;
+    this.voice = "neural:af_heart";
+    this.queue = [];
+    this.playing = false;
+    this.generation = 0; // bumped by stop() so anything in flight is dropped
+    this.context = null;
+    this.source = null;
+    this.errorReported = false;
+    this.systemAvailable = typeof speechSynthesis !== "undefined";
   }
 
-  voices() {
-    return this.available ? speechSynthesis.getVoices() : [];
+  systemVoices() {
+    return this.systemAvailable ? speechSynthesis.getVoices() : [];
   }
 
   get speaking() {
-    return this.pending > 0;
+    return this.playing;
   }
 
   say(text) {
-    if (!this.available || !text) return;
-    const utterance = new SpeechSynthesisUtterance(text);
-    const voice = this.voices().find((v) => v.name === this.voiceName);
-    if (voice) utterance.voice = voice;
-    utterance.rate = 1.05;
-    const generation = this.generation;
-    const finished = () => {
-      if (generation !== this.generation) return;
-      this.pending = Math.max(0, this.pending - 1);
-      if (this.pending === 0) this.onSpeakingChange(false);
-    };
-    utterance.onend = finished;
-    utterance.onerror = finished;
-    if (this.pending++ === 0) this.onSpeakingChange(true);
-    speechSynthesis.speak(utterance);
+    if (!text) return;
+    this.queue.push({ text, voice: this.voice, audio: null });
+    this.#pump();
+  }
+
+  /**
+   * Begin generating audio for a queued sentence. Only the sentence being
+   * played and the one after it are ever in flight, so an interruption
+   * leaves almost nothing to wait out.
+   */
+  #prepare(item) {
+    if (!item || item.audio || !item.voice.startsWith("neural:")) return;
+    item.audio = this.synthesize(item.text, item.voice.slice("neural:".length)).then(
+      (audio) => {
+        this.errorReported = false;
+        return audio;
+      },
+      (error) => {
+        if (!this.errorReported) this.onError(error);
+        this.errorReported = true;
+        return null;
+      },
+    );
   }
 
   stop() {
-    if (!this.available) return;
     this.generation++;
-    speechSynthesis.cancel();
-    if (this.pending > 0) {
-      this.pending = 0;
+    this.queue = [];
+    try {
+      this.source?.stop();
+    } catch {
+      // already finished
+    }
+    if (this.systemAvailable) speechSynthesis.cancel();
+    if (this.playing) {
+      this.playing = false;
       this.onSpeakingChange(false);
     }
+  }
+
+  async #pump() {
+    if (this.playing) return;
+    this.playing = true;
+    const generation = this.generation;
+    this.onSpeakingChange(true);
+    while (this.queue.length > 0 && generation === this.generation) {
+      const item = this.queue.shift();
+      this.#prepare(item);
+      this.#prepare(this.queue[0]);
+      const audio = item.audio ? await item.audio : null;
+      if (generation !== this.generation) return;
+      this.#prepare(this.queue[0]); // may have arrived while waiting
+      if (audio) await this.#playSamples(audio);
+      else await this.#speakWithSystem(item.text, item.voice);
+    }
+    if (generation !== this.generation) return;
+    this.playing = false;
+    this.onSpeakingChange(false);
+  }
+
+  #playSamples({ samples, sampleRate }) {
+    return new Promise((resolve) => {
+      this.context ??= new AudioContext();
+      const buffer = this.context.createBuffer(1, samples.length, sampleRate);
+      buffer.copyToChannel(samples, 0);
+      const source = this.context.createBufferSource();
+      source.buffer = buffer;
+      source.connect(this.context.destination);
+      source.onended = () => {
+        if (this.source === source) this.source = null;
+        resolve();
+      };
+      this.source = source;
+      this.context.resume().then(() => source.start(), resolve);
+    });
+  }
+
+  #speakWithSystem(text, chosen) {
+    return new Promise((resolve) => {
+      if (!this.systemAvailable) return resolve();
+      const utterance = new SpeechSynthesisUtterance(text);
+      const name = chosen.startsWith("system:") ? chosen.slice("system:".length) : "";
+      const voice = this.systemVoices().find((v) => v.name === name);
+      if (voice) utterance.voice = voice;
+      utterance.rate = 1.05;
+      utterance.onend = resolve;
+      utterance.onerror = resolve;
+      speechSynthesis.speak(utterance);
+    });
   }
 }
 
