@@ -86,6 +86,17 @@ test("runs tools, feeds results back, and streams text", async () => {
   assert.equal(agent.messages.length, 4);
 });
 
+test("spoken turns ask for a quick answer, typed turns for more thought, and the model follows the setting", async () => {
+  const { store, requests, send } = setup([text("a"), text("b"), text("c")]);
+  await send("hi", true);
+  await send("hi", false);
+  assert.deepEqual(requests.map((r) => r.output_config.effort), ["low", "medium"]);
+  assert.equal(requests[1].model, "claude-opus-5-5");
+  store.saveSettings({ brain: "fast" });
+  await send("hi", false);
+  assert.equal(requests[2].model, "claude-sonnet-5-5");
+});
+
 test("a failing tool is reported to the model as an error result", async () => {
   const { requests, send } = setup([toolCall("tu_1", "read_file", { path: "x.txt" }), text("No workspace yet.")]);
   await send("read x.txt");

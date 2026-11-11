@@ -25,8 +25,8 @@
       minSpeechMs = 300,
       maxMs = 25000,
       preRollMs = 300, // audio kept from just before speech started
-      minThreshold = 0.012,
-      noiseRatio = 3,
+      minThreshold = 0.006,
+      noiseRatio = 2.5,
     } = {}) {
       this.frameMs = frameMs;
       this.startFrames = startFrames;
@@ -104,21 +104,59 @@
     return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   }
 
+  /** Number of single-character edits between two short strings. */
+  function editDistance(a, b) {
+    let row = Array.from({ length: b.length + 1 }, (_, i) => i);
+    for (let i = 1; i <= a.length; i++) {
+      const next = [i];
+      for (let j = 1; j <= b.length; j++) {
+        next[j] = Math.min(row[j] + 1, next[j - 1] + 1, row[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      }
+      row = next;
+    }
+    return row[b.length];
+  }
+
+  const GREETING = "(?:(?:hey|hi|ok|okay|hello|yo)[\\s,]+)?";
+
   /**
-   * Looks for the assistant's name near the start of what was heard.
+   * Looks for the assistant's name at the start of what was heard.
    * "Hey Nova, what's next?" -> { matched: true, command: "what's next?" }
+   *
+   * Speech recognition often gets a short name slightly wrong ("Nora",
+   * "No va"), so a near miss in the name's position also counts: one wrong
+   * letter for names of four letters or more, or the name split in two words.
    */
   function matchWakeWord(transcript, name) {
     const text = String(transcript).trim();
     const wake = String(name).trim();
     if (!text || !wake) return { matched: false, command: "" };
-    const pattern = new RegExp(
-      `^(?:(?:hey|hi|ok|okay|hello|yo)[\\s,]+)?${escapeRegex(wake)}(?![\\p{L}\\p{N}])[\\s,.!?:;-]*`,
-      "iu",
-    );
-    const match = text.match(pattern);
-    if (!match) return { matched: false, command: "" };
-    return { matched: true, command: text.slice(match[0].length).trim() };
+
+    const exact = text.match(new RegExp(`^${GREETING}${escapeRegex(wake)}(?![\\p{L}\\p{N}])[\\s,.!?:;-]*`, "iu"));
+    if (exact) return { matched: true, command: text.slice(exact[0].length).trim() };
+
+    const target = wake.toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
+    if (target.length < 4) return { matched: false, command: "" };
+
+    const greeting = text.match(new RegExp(`^${GREETING}`, "iu"))[0];
+    const words = text.slice(greeting.length).match(/^([\p{L}\p{N}']+)(?:([\s,.!?:;-]+)([\p{L}\p{N}']+))?/u);
+    if (!words) return { matched: false, command: "" };
+    const [, first, gap = "", second = ""] = words;
+    const commandAfter = (length) =>
+      text
+        .slice(greeting.length + length)
+        .replace(/^[\s,.!?:;-]+/, "")
+        .trim();
+
+    // The name heard as two words: "no va".
+    if (second && (first + second).toLowerCase() === target) {
+      return { matched: true, command: commandAfter(first.length + gap.length + second.length) };
+    }
+    // One wrong, missing or extra letter: "Nora", "Novah".
+    if (editDistance(first.toLowerCase(), target) <= 1) {
+      return { matched: true, command: commandAfter(first.length) };
+    }
+    return { matched: false, command: "" };
   }
 
   /** Turn markdown-ish text into something a speech engine reads naturally. */
@@ -165,5 +203,5 @@
     }
   }
 
-  return { SAMPLE_RATE, rms, Endpointer, matchWakeWord, toSpeakable, SentenceChunker };
+  return { SAMPLE_RATE, rms, Endpointer, matchWakeWord, editDistance, toSpeakable, SentenceChunker };
 });

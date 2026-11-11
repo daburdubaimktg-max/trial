@@ -18,7 +18,7 @@
           <canvas id="orb" width="520" height="520"></canvas>
         </button>
         <div id="status" class="status" role="status" aria-live="polite">Ready</div>
-        <div id="hint" class="hint">Click the orb and speak</div>
+        <div id="hint" class="hint">Click the orb, or hold Space, and speak</div>
 
         <div class="core-actions">
           <button id="briefButton" class="pill">Brief me</button>
@@ -91,6 +91,20 @@
             <button id="previewVoiceButton" type="button" class="pill ghost">Play sample</button>
           </div>
         </label>
+
+        <div class="row">
+          <label class="field">
+            <span>Speech recognition accuracy</span>
+            <select id="speechModelSelect"></select>
+          </label>
+          <label class="field">
+            <span>Assistant model</span>
+            <select id="brainSelect">
+              <option value="capable">Most capable (Claude Opus 5.5)</option>
+              <option value="fast">Faster replies (Claude Sonnet 5.5)</option>
+            </select>
+          </label>
+        </div>
 
         <label class="field">
           <span>Calendar links (private iCal / .ics address, one per line)</span>

@@ -6,6 +6,7 @@ const fs = require("node:fs/promises");
 const path = require("node:path");
 const { z } = require("zod");
 const calendar = require("./calendar");
+const documents = require("./documents");
 
 const MAX_READ_BYTES = 400_000;
 
@@ -46,6 +47,28 @@ async function resolveInWorkspace(workspaceDir, relPath) {
  * @param {() => void} [deps.onDataChanged] called after tasks or memory change
  */
 function createTools({ store, openExternal, openPath, confirm, onDataChanged = () => {} }) {
+  /**
+   * Shared path for every tool that writes a file: confine to the workspace,
+   * check the extension, ask the user, then write.
+   */
+  async function saveWithApproval(rel, extension, summary, write) {
+    if (extension && path.extname(rel).toLowerCase() !== extension) {
+      throw new Error(`The file name must end in ${extension}.`);
+    }
+    const file = await resolveInWorkspace(store.getSettings().workspaceDir, rel);
+    let exists = true;
+    try {
+      await fs.access(file);
+    } catch {
+      exists = false;
+    }
+    const approved = await confirm(exists ? `Overwrite ${rel}?` : `Create ${rel}?`, `${summary} will be written to:\n${file}`);
+    if (!approved) return "The user declined this write.";
+    await fs.mkdir(path.dirname(file), { recursive: true });
+    await write(file);
+    return `Saved ${rel}.`;
+  }
+
   const tools = [
     {
       name: "remember",
@@ -166,10 +189,19 @@ function createTools({ store, openExternal, openPath, confirm, onDataChanged = (
     },
     {
       name: "read_file",
-      description: "Read a text file (notes, CSV, Markdown, code) from the workspace folder.",
-      schema: z.object({ path: z.string().min(1) }),
-      run: async ({ path: rel }) => {
+      description:
+        "Read a file from the workspace folder: Excel (.xlsx), Word (.docx), PowerPoint (.pptx), PDF, or any text file (CSV, Markdown, notes). Excel comes back as tab-separated rows with row numbers; for a large workbook you get an outline first and can then pass sheet, start_row and end_row to read a specific range.",
+      schema: z.object({
+        path: z.string().min(1),
+        sheet: z.string().optional().describe("Excel only: the sheet to read."),
+        start_row: z.number().int().min(1).optional().describe("Excel only: first row to read."),
+        end_row: z.number().int().min(1).optional().describe("Excel only: last row to read."),
+      }),
+      run: async ({ path: rel, sheet, start_row, end_row }) => {
         const file = await resolveInWorkspace(store.getSettings().workspaceDir, rel);
+        if (documents.isDocument(file)) {
+          return documents.readDocument(file, { sheet, startRow: start_row, endRow: end_row });
+        }
         const stat = await fs.stat(file);
         if (stat.size > MAX_READ_BYTES) {
           throw new Error(
@@ -177,32 +209,100 @@ function createTools({ store, openExternal, openPath, confirm, onDataChanged = (
           );
         }
         const buf = await fs.readFile(file);
-        if (buf.includes(0)) throw new Error("This looks like a binary file, not text.");
+        if (buf.includes(0)) {
+          throw new Error("This file type cannot be read. Supported: Excel (.xlsx), Word (.docx), PowerPoint (.pptx), PDF and text files.");
+        }
         return buf.toString("utf8");
       },
     },
     {
       name: "write_file",
       description:
-        "Create or overwrite a text file in the workspace folder, for example to save a draft, report, or notes. The user is asked to approve each write.",
+        "Create or overwrite a plain text file in the workspace folder (.txt, .md, .csv), for example to save a draft or notes. For Excel, PowerPoint or Word files use create_spreadsheet, create_presentation or create_document. The user is asked to approve each write.",
       schema: z.object({ path: z.string().min(1), content: z.string() }),
       run: async ({ path: rel, content }) => {
-        const file = await resolveInWorkspace(store.getSettings().workspaceDir, rel);
-        let exists = true;
-        try {
-          await fs.access(file);
-        } catch {
-          exists = false;
+        if (documents.isDocument(rel)) {
+          throw new Error("write_file only writes plain text. Use create_spreadsheet, create_presentation or create_document for Office files.");
         }
-        const approved = await confirm(
-          exists ? `Overwrite ${rel}?` : `Create ${rel}?`,
-          `${content.length.toLocaleString()} characters will be written to:\n${file}`,
+        return saveWithApproval(rel, null, `${content.length.toLocaleString()} characters`, async (file) =>
+          fs.writeFile(file, content, "utf8"),
         );
-        if (!approved) return "The user declined this write.";
-        await fs.mkdir(path.dirname(file), { recursive: true });
-        await fs.writeFile(file, content, "utf8");
-        return `Saved ${rel}.`;
       },
+    },
+    {
+      name: "create_spreadsheet",
+      description:
+        "Create an Excel workbook (.xlsx) in the workspace folder. Each sheet is a grid of rows; the first row is styled as the header. A string cell starting with = is written as a formula, e.g. \"=SUM(B2:B9)\". Prefer formulas for totals so the user can change the inputs. The user is asked to approve the write.",
+      schema: z.object({
+        path: z.string().min(1).describe("File name ending in .xlsx"),
+        sheets: z
+          .array(
+            z.object({
+              name: z.string().min(1),
+              rows: z.array(z.array(z.union([z.string(), z.number(), z.boolean(), z.null()]))),
+            }),
+          )
+          .min(1),
+      }),
+      run: async ({ path: rel, sheets }) => {
+        const rowCount = sheets.reduce((n, s) => n + s.rows.length, 0);
+        return saveWithApproval(rel, ".xlsx", `${sheets.length} sheet(s), ${rowCount} rows`, (file) =>
+          documents.writeSpreadsheet(file, sheets),
+        );
+      },
+    },
+    {
+      name: "create_presentation",
+      description:
+        "Create a PowerPoint deck (.pptx) in the workspace folder. A cover slide is made from title and subtitle. Each further slide has a title and any of: bullets (keep to 3-5 short lines), one table (first row is the header), or one chart, plus optional speaker notes. A slide can pair bullets with a chart or table. Put one message per slide and state it in the slide title. The user is asked to approve the write.",
+      schema: z.object({
+        path: z.string().min(1).describe("File name ending in .pptx"),
+        title: z.string().min(1),
+        subtitle: z.string().optional(),
+        slides: z
+          .array(
+            z.object({
+              title: z.string().min(1),
+              bullets: z.array(z.string()).optional(),
+              table: z.array(z.array(z.union([z.string(), z.number()]))).optional(),
+              chart: z
+                .object({
+                  type: z.enum(["bar", "line", "pie"]),
+                  categories: z.array(z.string()).min(1),
+                  series: z.array(z.object({ name: z.string(), values: z.array(z.number()) })).min(1),
+                })
+                .refine((c) => c.series.every((s) => s.values.length === c.categories.length), {
+                  message: "each series needs one value per category",
+                })
+                .optional(),
+              notes: z.string().optional(),
+            }),
+          )
+          .min(1),
+      }),
+      run: async ({ path: rel, ...deck }) =>
+        saveWithApproval(rel, ".pptx", `${deck.slides.length + 1} slides`, (file) => documents.writePresentation(file, deck)),
+    },
+    {
+      name: "create_document",
+      description:
+        "Create a Word document (.docx) in the workspace folder from a title and a list of blocks. Each block is exactly one of: a heading, a paragraph, a bullet list, or a table (first row is the header). The user is asked to approve the write.",
+      schema: z.object({
+        path: z.string().min(1).describe("File name ending in .docx"),
+        title: z.string().min(1),
+        blocks: z
+          .array(
+            z.union([
+              z.object({ heading: z.string().min(1) }),
+              z.object({ paragraph: z.string().min(1) }),
+              z.object({ bullets: z.array(z.string()).min(1) }),
+              z.object({ table: z.array(z.array(z.union([z.string(), z.number()]))).min(1) }),
+            ]),
+          )
+          .min(1),
+      }),
+      run: async ({ path: rel, ...doc }) =>
+        saveWithApproval(rel, ".docx", `${doc.blocks.length} sections`, (file) => documents.writeWord(file, doc)),
     },
     {
       name: "open_file",

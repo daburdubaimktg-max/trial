@@ -17,7 +17,7 @@ const path = require("node:path");
 const { Store } = require("./store");
 const { createTools } = require("./tools");
 const { Agent } = require("./agent");
-const { SpeechToText } = require("./stt");
+const { SpeechToText, MODELS: SPEECH_MODELS } = require("./stt");
 const { NeuralVoice, VOICES } = require("./tts");
 const calendar = require("./calendar");
 
@@ -39,6 +39,7 @@ function snapshot() {
     tasks: store.getTasks(),
     memories: store.getMemories(),
     neuralVoices: VOICES,
+    speechModels: Object.entries(SPEECH_MODELS).map(([id, m]) => ({ id, label: m.label })),
   };
 }
 
@@ -73,7 +74,11 @@ function setUp() {
     onDataChanged: () => send("data:changed", snapshot()),
   });
   agent = new Agent({ store, tools });
-  stt = new SpeechToText(path.join(dataDir, "models"), (status) => send("stt:status", status));
+  stt = new SpeechToText({
+    cacheDir: path.join(dataDir, "models"),
+    getModelKey: () => store.getSettings().speechModel,
+    onStatus: (status) => send("stt:status", status),
+  });
   voice = new NeuralVoice({
     cacheDir: path.join(dataDir, "models"),
     fork: (script, args) => utilityProcess.fork(script, args, { serviceName: "Voice engine" }),
@@ -127,9 +132,17 @@ function registerIpc() {
     return result.canceled ? null : result.filePaths[0];
   });
 
-  ipcMain.handle("chat:send", (_e, { text, spoken }) =>
-    agent.send(String(text), { spoken: Boolean(spoken), onEvent: (event) => send("chat:event", event) }),
-  );
+  // The outcome is delivered as a final "done" event on the same channel as
+  // the streamed text. Returning it from this call instead would let it
+  // overtake the last pieces of text, which travel separately.
+  ipcMain.handle("chat:send", (_e, { id, text, spoken }) => {
+    const emit = (event) => send("chat:event", { id, ...event });
+    agent
+      .send(String(text), { spoken: Boolean(spoken), onEvent: emit })
+      .catch((err) => ({ status: "error", message: err.message || String(err) }))
+      .then((result) => emit({ type: "done", result }));
+    return true;
+  });
   ipcMain.handle("chat:cancel", () => agent.cancel());
   ipcMain.handle("chat:reset", () => agent.reset());
 

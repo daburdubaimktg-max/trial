@@ -14,6 +14,10 @@ const DEFAULT_SETTINGS = {
   // "neural:<voice id>" for the built-in voice, "system:<name>" for an
   // operating-system voice ("system:" alone is the system default).
   voice: "neural:af_heart",
+  // Speech recognition accuracy: "fast", "balanced" or "best".
+  speechModel: "balanced",
+  // Which Claude model answers: "capable" (Opus) or "fast" (Sonnet).
+  brain: "capable",
   calendarUrls: [],
   workspaceDir: "",
 };

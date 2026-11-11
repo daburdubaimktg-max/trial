@@ -4,8 +4,14 @@
 
 const Anthropic = require("@anthropic-ai/sdk");
 
-const MODEL = "claude-opus-5-5";
-const EFFORT = "medium";
+// "capable" is the default; "fast" trades some depth for quicker replies.
+const BRAINS = {
+  capable: "claude-opus-5-5",
+  fast: "claude-sonnet-5-5",
+};
+const MODEL = BRAINS.capable;
+// Spoken turns are a conversation: answer quickly. Typed turns get more thought.
+const EFFORT = { spoken: "low", typed: "medium" };
 const MAX_TOKENS = 64000;
 const MAX_STEPS = 40; // safety stop for one user turn
 const FALLBACK_BETA = "server-side-fallback-2026-07-01";
@@ -17,7 +23,7 @@ const SERVER_TOOLS = [
 
 function buildSystem(settings, memories) {
   const name = settings.assistantName;
-  const persona = `You are ${name}, a personal work assistant that lives on the user's desktop. They talk to you by voice or by typing, and you can act for them: manage their tasks and reminders, read their calendar, search and read the web, remember things about them between conversations, and work with files in a folder they have shared with you.
+  const persona = `You are ${name}, a personal work assistant that lives on the user's desktop. They talk to you by voice or by typing, and you can act for them: manage their tasks and reminders, read their calendar, search and read the web, remember things about them between conversations, and work with files in a folder they have shared with you. In that folder you can read Excel, Word, PowerPoint, PDF and text files, and create real Excel workbooks, PowerPoint decks and Word documents.
 
 How to be useful:
 - Lead with the answer or the result. The user is busy and often listening rather than reading.
@@ -26,7 +32,11 @@ How to be useful:
 - When you learn something durable about the user (who they work with, how they like things done, what they are working on), save it with the remember tool without being asked. Use what you already remember naturally, without announcing it.
 - Dates and reminders: each user message starts with the current local date and time. Resolve "tomorrow", "Friday", "in an hour" from it and write times with the same UTC offset.
 - A daily briefing covers, in this order: today's meetings, tasks due or overdue, then anything worth flagging. Keep it under a minute of speech.
-- You cannot send email or change calendar events yet. If asked, say so plainly and offer what you can do instead, such as drafting the text or adding a reminder.
+- Working with data: read the file before answering questions about it, and quote the numbers you used. When asked for a report, deck or summary, produce the actual file with create_presentation, create_spreadsheet or create_document rather than describing what it would contain, then say where you saved it. If no workspace folder is set, tell them to choose one in Settings.
+- Research: search several sources, prefer primary and recent ones, give the date of anything time-sensitive, and say when sources disagree or you could not confirm something.
+- You cannot read or send email, or change calendar events, yet. If asked, say so in one sentence and do the closest useful thing straight away: draft the email text, save it as a document, or set a reminder.
+
+Spoken messages reach you as an automatic transcript, which can mishear words, especially names, brands and numbers. Read them for what the user most plausibly meant, using what you remember about their work (a brand heard as a similar-sounding common word is almost certainly the brand). Proceed on the obvious reading without commenting on it. Ask only when two readings would lead to different actions, and when the user corrects a word you got wrong, remember the correct term.
 
 Voice replies: when a message is marked as spoken, your reply is read aloud. Use plain conversational sentences with no markdown, bullet symbols, tables, or URLs, and keep it brief unless they ask for detail. When a message is typed, light markdown is fine.
 
@@ -139,7 +149,7 @@ class Agent {
       let jsonRetries = 0;
 
       for (let step = 0; step < MAX_STEPS; step++) {
-        const message = await this.#requestTurn(client, system, controller.signal, onEvent).catch((err) => {
+        const message = await this.#requestTurn(client, system, controller.signal, onEvent, spoken).catch((err) => {
           // With eager tool-input streaming, unparseable tool JSON surfaces as
           // a non-API error; re-issue that turn a couple of times.
           if (err instanceof Anthropic.APIError || controller.signal.aborted || jsonRetries++ >= 2) throw err;
@@ -191,11 +201,11 @@ class Agent {
     }
   }
 
-  async #requestTurn(client, system, signal, onEvent) {
+  async #requestTurn(client, system, signal, onEvent, spoken) {
     const params = {
-      model: MODEL,
+      model: BRAINS[this.store.getSettings().brain] ?? MODEL,
       max_tokens: MAX_TOKENS,
-      output_config: { effort: EFFORT },
+      output_config: { effort: spoken ? EFFORT.spoken : EFFORT.typed },
       cache_control: { type: "ephemeral" },
       system,
       tools: [...this.tools.definitions, ...SERVER_TOOLS],
@@ -245,4 +255,4 @@ function describeError(err) {
   return err.message || String(err);
 }
 
-module.exports = { Agent, buildSystem, nowContext, MODEL };
+module.exports = { Agent, buildSystem, nowContext, MODEL, BRAINS };

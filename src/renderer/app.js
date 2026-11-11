@@ -34,6 +34,7 @@ const state = {
   memories: [],
   mode: "idle", // idle | listening | transcribing | thinking | speaking
   oneShot: false, // the orb was clicked: take the next phrase as a command
+  holding: false, // the talk key is held down
   followUpUntil: 0,
   turn: null, // the assistant message being streamed
   speechReady: false,
@@ -133,12 +134,14 @@ function addMessage(kind, text) {
   return node;
 }
 
+let turnCounter = 0; // each request gets an id so stray events from an old one are ignored
+
 function startAssistantMessage() {
   const node = addMessage("assistant");
   const steps = node.appendChild(el("div", "steps"));
   const body = node.appendChild(el("div", "body"));
   body.append(el("span", "typing"));
-  return { node, steps, body, text: "", renderQueued: false, seenTools: new Set() };
+  return { id: ++turnCounter, node, steps, body, text: "", renderQueued: false, seenTools: new Set(), finish: () => {} };
 }
 
 function queueRender(turn) {
@@ -179,8 +182,9 @@ function setMode(mode) {
 
 function updateHint(custom) {
   const name = state.settings?.assistantName ?? "Nova";
-  let hint = "Click the orb and speak";
+  let hint = "Click the orb, or hold Space, and speak";
   if (custom) hint = custom;
+  else if (state.holding) hint = "Listening. Release Space when you're done";
   else if (state.mode === "listening") hint = "Go ahead, I'm listening";
   else if (state.mode === "thinking" || state.mode === "speaking") hint = "Click the orb to interrupt";
   else if (wakeListening()) hint = `Say “${name}” followed by what you need`;
@@ -259,6 +263,15 @@ const speaker = new Voice.Speaker({
     addMessage("notice", `The built-in voice isn't available (${error.message}). Using the system voice for now.`),
 });
 
+/** Load speech recognition in the background so the first phrase isn't delayed. */
+function warmUpSpeech() {
+  if (!state.hasApiKey) return; // not set up yet; don't start a large download
+  api.loadSpeech().then(
+    () => (state.speechReady = true),
+    () => (state.speechReady = false), // the failure is reported when the microphone is used
+  );
+}
+
 /** Load the neural voice in the background so the first reply isn't delayed. */
 function warmUpVoice() {
   if (state.settings.speakReplies && state.settings.voice.startsWith("neural:")) {
@@ -275,8 +288,9 @@ const mic = new Voice.Microphone({
 });
 
 async function ensureSpeechReady() {
-  if (state.speechReady) return true;
-  updateHint("Preparing speech recognition (one-time download)…");
+  // The main process caches the loaded model, so this is instant after the
+  // first time and picks up a changed accuracy setting.
+  if (!state.speechReady) updateHint("Preparing speech recognition (one-time download)…");
   try {
     await api.loadSpeech();
     state.speechReady = true;
@@ -327,13 +341,73 @@ async function handleUtterance(samples) {
   }
 
   // Wake-word mode: act only when the phrase starts with the assistant's name.
-  const { matched, command } = VoiceLogic.matchWakeWord(text, state.settings.assistantName);
-  if (!matched) return;
+  const name = state.settings.assistantName;
+  const { matched, command } = VoiceLogic.matchWakeWord(text, name);
+  if (!matched) {
+    // Show what was heard, so it is clear the microphone works and why
+    // nothing happened.
+    if (text && state.mode === "idle") {
+      const heard = text.length > 60 ? `${text.slice(0, 60)}…` : text;
+      updateHint(`Heard “${heard}”. Start with “${name}” to talk to me.`);
+      clearTimeout(handleUtterance.hintTimer);
+      handleUtterance.hintTimer = setTimeout(() => updateHint(), 5000);
+    }
+    return;
+  }
   if (command) return submit(command, true);
   // Just the name: wait for the request itself.
   state.followUpUntil = Date.now() + FOLLOW_UP_MS;
   setMode("listening");
 }
+
+// Hold Space to talk: records exactly while the key is down.
+function typingTarget(target) {
+  return target instanceof HTMLElement && target.closest("input, textarea, select, dialog");
+}
+
+document.addEventListener("keydown", async (event) => {
+  if (event.code !== "Space" || event.repeat || state.holding || typingTarget(event.target)) return;
+  event.preventDefault();
+  state.holding = true;
+  if (state.turn || speaker.speaking) await interrupt();
+  if (!(await startMic()) || !state.holding) {
+    state.holding = false; // microphone unavailable, or the key was already released
+    stopMicUnlessWake();
+    return updateHint();
+  }
+  state.oneShot = false;
+  mic.beginManual();
+  setMode("listening");
+});
+
+document.addEventListener("keyup", async (event) => {
+  if (event.code !== "Space" || !state.holding) return;
+  event.preventDefault(); // don't also "click" a focused button
+  state.holding = false;
+  if (!mic.manual) return; // released before recording began
+  const samples = mic.endManual();
+  stopMicUnlessWake();
+  if (samples.length < VoiceLogic.SAMPLE_RATE * 0.3) return setMode("idle"); // a tap, not speech
+  setMode("transcribing");
+  let text = "";
+  try {
+    text = await api.transcribe(samples);
+  } catch (err) {
+    addMessage("error", `I couldn't make that out: ${err.message}`);
+  }
+  if (text) return submit(text, true);
+  updateHint("I didn't catch anything. Try again a little closer to the microphone.");
+  setMode("idle");
+});
+
+window.addEventListener("blur", () => {
+  // The key-up never arrives if the window loses focus mid-hold.
+  if (!state.holding) return;
+  state.holding = false;
+  if (mic.manual) mic.endManual();
+  stopMicUnlessWake();
+  setMode("idle");
+});
 
 /** Called when a reply (and any speech) has finished. */
 function afterReply() {
@@ -354,7 +428,10 @@ async function submit(text, spoken) {
   turn.chunker = chunker;
   setMode("thinking");
 
-  const result = await api.send(text, spoken);
+  const result = await new Promise((resolve) => {
+    turn.finish = resolve; // called by the "done" event, or by interrupt()
+    api.send(turn.id, text, spoken).catch((err) => resolve({ status: "error", message: err.message }));
+  });
   if (state.turn !== turn) return; // superseded by a newer message
 
   state.turn = null;
@@ -379,6 +456,7 @@ async function interrupt() {
   if (turn) {
     turn.body.querySelector(".typing")?.remove();
     if (!turn.text) turn.node.remove();
+    turn.finish({ status: "cancelled" });
     await api.cancel();
   }
   setMode("idle");
@@ -386,7 +464,8 @@ async function interrupt() {
 
 api.onChatEvent((event) => {
   const turn = state.turn;
-  if (!turn) return;
+  if (!turn || event.id !== turn.id) return;
+  if (event.type === "done") return turn.finish(event.result);
   if (event.type === "text") {
     turn.text += event.delta;
     queueRender(turn);
@@ -547,6 +626,9 @@ function openSettings() {
   $("calendarInput").value = s.calendarUrls.join("\n");
   $("workspaceInput").value = s.workspaceDir;
   $("settingsError").hidden = true;
+  $("speechModelSelect").replaceChildren(...state.speechModels.map((m) => new Option(m.label, m.id)));
+  $("speechModelSelect").value = s.speechModel;
+  $("brainSelect").value = s.brain;
   fillVoices();
   $("settingsDialog").showModal();
 }
@@ -564,6 +646,8 @@ $("settingsForm").addEventListener("submit", async (event) => {
         assistantName: $("assistantNameInput").value,
         userName: $("userNameInput").value.trim(),
         voice: $("voiceSelect").value,
+        speechModel: $("speechModelSelect").value,
+        brain: $("brainSelect").value,
         calendarUrls: $("calendarInput").value.split("\n"),
         workspaceDir: $("workspaceInput").value,
       },
@@ -575,6 +659,8 @@ $("settingsForm").addEventListener("submit", async (event) => {
     return;
   }
   $("settingsDialog").close();
+  state.speechReady = false; // the accuracy setting may have changed
+  warmUpSpeech();
   warmUpVoice();
   refreshAgenda();
   if (!messagesEl.querySelector(".msg")) showEmptyState();
@@ -698,6 +784,7 @@ api.onVoiceStatus((status) => {
   setInterval(renderTasks, 60_000); // keep "overdue" markers current
   if (typeof speechSynthesis !== "undefined") speechSynthesis.addEventListener("voiceschanged", fillVoices);
 
+  warmUpSpeech();
   warmUpVoice();
   if (!state.hasApiKey) openSettings();
   if (state.settings.wakeWordEnabled && !(await startMic())) {

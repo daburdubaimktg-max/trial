@@ -6,8 +6,9 @@ between conversations.
 
 ## What it does
 
-- **Voice conversation.** Click the orb and speak, or switch on the wake word
-  and say "Nova, …". Replies are read aloud as they stream in, in a natural
+- **Voice conversation.** Click the orb and speak, hold the Space bar while
+  you talk (the most reliable way), or switch on the wake word and say
+  "Nova, …". Replies are read aloud as they stream in, in a natural
   built-in voice (ten to choose from in Settings, with a "Play sample"
   button), or any voice installed on your system. Speech recognition and
   the built-in voice both run on your computer, so audio never leaves it.
@@ -18,8 +19,10 @@ between conversations.
 - **Remembers you.** Saves durable facts (who you work with, how you like
   things done) and uses them in later conversations. Everything it remembers
   is listed in the side panel, where you can delete any item.
-- **Works with your files.** Reads and writes text files in one folder you
-  choose. Every write asks for your approval first.
+- **Works with your files.** In one folder you choose, it reads Excel, Word,
+  PowerPoint, PDF and text files, and creates real Excel workbooks (with
+  formulas), PowerPoint decks (with charts and tables) and Word documents.
+  Every write asks for your approval first.
 
 ## Getting started
 
@@ -38,9 +41,23 @@ On first launch the Settings window opens. Paste your API key there (it is
 stored encrypted by your operating system), or set the `ANTHROPIC_API_KEY`
 environment variable before starting instead.
 
-Two models are downloaded once on first use: speech recognition (about
-80 MB, when you first use the microphone) and the built-in voice (about
-90 MB, when the first reply is spoken).
+Two models are downloaded once, in the background, after your API key is
+saved: speech recognition (about 240 MB) and the built-in voice (about
+90 MB).
+
+### If it mishears you or feels slow
+
+Settings has two controls for this:
+
+- **Speech recognition accuracy.** "Balanced" is the default. "Most accurate"
+  mishears fewer names and brands but is a 1.1 GB download and takes longer
+  per phrase; "Fast" is the reverse.
+- **Assistant model.** "Most capable" (Claude Opus 5.5) is the default.
+  "Faster replies" (Claude Sonnet 5.5) answers sooner and costs less per
+  request.
+
+Nova also corrects likely mis-hearings from context, and remembers the right
+word once you correct it.
 
 ### Connecting your calendar
 
@@ -59,14 +76,15 @@ link like a password: anyone who has it can read that calendar.
 
 - **Not built yet:** sending or reading email, and creating or changing
   calendar events. Nova will draft text and set reminders instead.
-- Speech recognition is English-only (Whisper `base.en`), and the built-in
+- Speech recognition is English-only, and the built-in
   voices (Kokoro) are English. If the built-in voice cannot load, replies
   fall back to the system voice.
 - The wake word works by transcribing each phrase it hears locally and
   checking whether it starts with the assistant's name, so it uses some CPU
   while switched on. While Nova is thinking or speaking the microphone is
   ignored; click the orb to interrupt.
-- Requests use the `claude-opus-5-5` model and are billed to your API key. If a
+- Requests use the model chosen in Settings (`claude-opus-5-5` by default)
+  and are billed to your API key. If a
   request is declined by a safety check, the API is allowed to retry it on
   another Claude model (server-side fallback).
 - Your settings, tasks and memories are plain JSON files in the app's data
@@ -81,6 +99,7 @@ link like a password: anyone who has it can read that calendar.
 | `src/main/tools.js` | Actions the assistant can take |
 | `src/main/store.js` | Settings, tasks, memory on disk |
 | `src/main/calendar.js` | iCal calendar reader |
+| `src/main/documents.js` | Reading and creating Office and PDF files |
 | `src/main/stt.js` | Local speech-to-text |
 | `src/main/tts.js`, `tts-process.js` | Built-in neural voice |
 | `src/renderer/` | Interface, microphone capture, spoken replies |

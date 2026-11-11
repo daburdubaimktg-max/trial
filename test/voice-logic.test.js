@@ -31,6 +31,8 @@ test("endpointer ignores short clicks and steady background noise", () => {
   assert.equal(feed(ep, [[0.001, 10], [0.2, 1], [0.001, 15]]).length, 0);
   assert.equal(feed(ep, [[0.001, 10], [0.2, 2], [0.001, 15]]).length, 0); // 200 ms < minSpeech
   assert.equal(feed(new Endpointer(), [[0.02, 200]]).length <= 1, true);
+  // Quiet speech from a laptop microphone still registers.
+  assert.equal(feed(new Endpointer(), [[0.0015, 10], [0.012, 8], [0.0015, 10]]).length, 1);
 });
 
 test("endpointer cuts very long speech at the cap", () => {
@@ -48,6 +50,19 @@ test("wake word matches at the start only, with common greetings", () => {
   assert.equal(matchWakeWord("Novartis results are out", "Nova").matched, false);
   assert.equal(matchWakeWord("", "Nova").matched, false);
   assert.equal(matchWakeWord("Okay C.3 (beta) go", "C.3 (beta)").matched, true);
+});
+
+test("wake word tolerates the near misses speech recognition makes", () => {
+  assert.deepEqual(matchWakeWord("Nora, what's on today?", "Nova"), { matched: true, command: "what's on today?" });
+  assert.deepEqual(matchWakeWord("Hey Novah remind me at four", "Nova"), { matched: true, command: "remind me at four" });
+  assert.deepEqual(matchWakeWord("No va, open the tracker", "Nova"), { matched: true, command: "open the tracker" });
+  assert.deepEqual(matchWakeWord("Nov.", "Nova"), { matched: true, command: "" });
+  // Two letters off, or the right word in the wrong place, is not a match.
+  assert.equal(matchWakeWord("Noah called earlier", "Nova").matched, false);
+  assert.equal(matchWakeWord("Never mind that", "Nova").matched, false);
+  assert.equal(matchWakeWord("Tell Nora I said hi", "Nova").matched, false);
+  // Very short names must match exactly.
+  assert.equal(matchWakeWord("Max, hello", "Sam").matched, false);
 });
 
 test("toSpeakable strips markdown and links", () => {

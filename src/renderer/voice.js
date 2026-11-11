@@ -18,6 +18,26 @@ class Microphone {
     this.context = null;
     this.stream = null;
     this.paused = false;
+    this.manual = null; // frames collected while the talk key is held
+  }
+
+  /** Record everything until endManual(), with no guessing about pauses. */
+  beginManual() {
+    this.endpointer.reset();
+    this.manual = [];
+  }
+
+  /** @returns {Float32Array} everything recorded since beginManual() */
+  endManual() {
+    const frames = this.manual ?? [];
+    this.manual = null;
+    const out = new Float32Array(frames.reduce((n, f) => n + f.length, 0));
+    let offset = 0;
+    for (const frame of frames) {
+      out.set(frame, offset);
+      offset += frame.length;
+    }
+    return out;
   }
 
   get active() {
@@ -61,6 +81,11 @@ class Microphone {
   #onFrame(frame) {
     if (this.paused) return;
     this.onLevel(Math.min(1, VoiceLogic.rms(frame) * 12));
+    if (this.manual) {
+      // Stop collecting at the recogniser's limit; the rest would be refused.
+      if (this.manual.length < Microphone.MAX_MANUAL_FRAMES) this.manual.push(frame);
+      return;
+    }
     const wasInSpeech = this.endpointer.inSpeech;
     const utterance = this.endpointer.push(frame);
     if (!wasInSpeech && this.endpointer.inSpeech) this.onSpeechStart();
@@ -74,6 +99,8 @@ class Microphone {
  * voice. If the neural voice fails, that sentence falls back to the system
  * voice so a reply is never silently dropped.
  */
+Microphone.MAX_MANUAL_FRAMES = 270; // 27 s of 100 ms frames
+
 class Speaker {
   /**
    * @param {object} deps

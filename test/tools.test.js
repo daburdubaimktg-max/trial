@@ -102,7 +102,7 @@ test("read_file refuses oversized and binary files", async () => {
   fs.writeFileSync(path.join(workspace, "big.txt"), "a".repeat(400_001));
   fs.writeFileSync(path.join(workspace, "img.bin"), Buffer.from([1, 0, 2]));
   assert.match((await tools.execute("read_file", { path: "big.txt" })).content, /too large/);
-  assert.match((await tools.execute("read_file", { path: "img.bin" })).content, /binary/);
+  assert.match((await tools.execute("read_file", { path: "img.bin" })).content, /cannot be read/);
 });
 
 test("file tools explain when no workspace is set", async () => {

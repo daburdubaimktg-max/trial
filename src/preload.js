@@ -12,7 +12,7 @@ contextBridge.exposeInMainWorld("nova", {
   saveSettings: (patch, apiKey) => ipcRenderer.invoke("settings:save", { patch, apiKey }),
   pickWorkspace: () => ipcRenderer.invoke("settings:pickWorkspace"),
 
-  send: (text, spoken) => ipcRenderer.invoke("chat:send", { text, spoken }),
+  send: (id, text, spoken) => ipcRenderer.invoke("chat:send", { id, text, spoken }),
   cancel: () => ipcRenderer.invoke("chat:cancel"),
   reset: () => ipcRenderer.invoke("chat:reset"),
 
