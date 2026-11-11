@@ -13,11 +13,12 @@ function setup({ approve = true } = {}) {
   fs.writeFileSync(path.join(base, "secret.txt"), "outside");
   const store = new Store(path.join(base, "data"));
   store.saveSettings({ workspaceDir: workspace });
-  const calls = { opened: [], confirms: [], changed: 0 };
+  const calls = { opened: [], confirms: [], copied: [], changed: 0 };
   const tools = createTools({
     store,
     openExternal: async (url) => calls.opened.push(url),
     openPath: async () => "",
+    copyText: (text) => calls.copied.push(text),
     confirm: async (message) => {
       calls.confirms.push(message);
       return approve;
@@ -116,6 +117,41 @@ test("open_url only opens web links", async () => {
   assert.equal((await tools.execute("open_url", { url: "file:///etc/passwd" })).isError, true);
   assert.equal((await tools.execute("open_url", { url: "https://example.com/a" })).isError, false);
   assert.deepEqual(calls.opened, ["https://example.com/a"]);
+});
+
+test("draft_email opens a filled-in draft and never sends", async () => {
+  const { tools, calls } = setup();
+  const res = await tools.execute("draft_email", {
+    to: ["priya@example.com"],
+    cc: ["sam@example.com"],
+    subject: "Q3 review & next steps",
+    body: "Hi Priya,\n\nNumbers attached.\n\nThanks",
+  });
+  assert.equal(res.isError, false, res.content);
+  assert.match(res.content, /has not been sent/);
+  const url = new URL(calls.opened[0]);
+  assert.equal(url.protocol, "mailto:");
+  assert.equal(decodeURIComponent(url.pathname), "priya@example.com");
+  assert.equal(url.searchParams.get("subject"), "Q3 review & next steps");
+  assert.equal(url.searchParams.get("cc"), "sam@example.com");
+  assert.equal(url.searchParams.get("body"), "Hi Priya,\r\n\r\nNumbers attached.\r\n\r\nThanks");
+  assert.deepEqual(calls.copied, []);
+});
+
+test("a long email body goes to the clipboard instead of the link", async () => {
+  const { tools, calls } = setup();
+  const body = "A long paragraph. ".repeat(200);
+  const res = await tools.execute("draft_email", { to: [], subject: "Report", body });
+  assert.match(res.content, /clipboard/);
+  assert.deepEqual(calls.copied, [body]);
+  assert.equal(calls.opened[0], "mailto:?subject=Report");
+});
+
+test("draft_email rejects malformed addresses", async () => {
+  const { tools, calls } = setup();
+  const res = await tools.execute("draft_email", { to: ["priya at example"], subject: "s", body: "b" });
+  assert.equal(res.isError, true);
+  assert.deepEqual(calls.opened, []);
 });
 
 test("calendar tool reports when nothing is connected", async () => {

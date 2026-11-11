@@ -12,6 +12,7 @@ const {
   session,
   Notification,
   utilityProcess,
+  clipboard,
 } = require("electron");
 const path = require("node:path");
 const { Store } = require("./store");
@@ -60,6 +61,7 @@ function setUp() {
     store,
     openExternal: (url) => shell.openExternal(url),
     openPath: (file) => shell.openPath(file),
+    copyText: (text) => clipboard.writeText(text),
     confirm: async (message, detail) => {
       const { response } = await dialog.showMessageBox(win, {
         type: "question",

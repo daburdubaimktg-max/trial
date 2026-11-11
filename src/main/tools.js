@@ -9,6 +9,9 @@ const calendar = require("./calendar");
 const documents = require("./documents");
 
 const MAX_READ_BYTES = 400_000;
+// Mail apps truncate or reject very long mailto: links, so longer bodies are
+// handed over on the clipboard instead.
+const MAX_MAILTO_BODY = 1500;
 
 const isoDateTime = z
   .string()
@@ -44,9 +47,10 @@ async function resolveInWorkspace(workspaceDir, relPath) {
  * @param {(url: string) => Promise<void>} deps.openExternal
  * @param {(filePath: string) => Promise<string>} deps.openPath
  * @param {(message: string, detail: string) => Promise<boolean>} deps.confirm
+ * @param {(text: string) => void} deps.copyText puts text on the clipboard
  * @param {() => void} [deps.onDataChanged] called after tasks or memory change
  */
-function createTools({ store, openExternal, openPath, confirm, onDataChanged = () => {} }) {
+function createTools({ store, openExternal, openPath, confirm, copyText, onDataChanged = () => {} }) {
   /**
    * Shared path for every tool that writes a file: confine to the workspace,
    * check the extension, ask the user, then write.
@@ -157,6 +161,29 @@ function createTools({ store, openExternal, openPath, confirm, onDataChanged = (
         }
         const { events, errors } = await calendar.getEvents(urls, new Date(from), new Date(to));
         return JSON.stringify({ events, errors });
+      },
+    },
+    {
+      name: "draft_email",
+      description:
+        "Open a new email in the user's mail app (Outlook, Apple Mail) with the recipients, subject and body filled in, ready for them to review and send. This is how you help with email: you cannot send it yourself or read their inbox. Write the body as plain text with blank lines between paragraphs.",
+      schema: z.object({
+        to: z.array(z.string().email()).describe("Recipient addresses. Leave empty if you do not know the address; never guess one."),
+        cc: z.array(z.string().email()).optional(),
+        subject: z.string().min(1),
+        body: z.string().min(1),
+      }),
+      run: async ({ to, cc, subject, body }) => {
+        const fitsInLink = body.length <= MAX_MAILTO_BODY;
+        const params = [`subject=${encodeURIComponent(subject)}`];
+        if (cc?.length) params.push(`cc=${cc.map(encodeURIComponent).join(",")}`);
+        // Mail apps expect CRLF line breaks in mailto bodies.
+        if (fitsInLink) params.push(`body=${encodeURIComponent(body.replace(/\r?\n/g, "\r\n"))}`);
+        else copyText(body);
+        await openExternal(`mailto:${to.map(encodeURIComponent).join(",")}?${params.join("&")}`);
+        return fitsInLink
+          ? "The draft is open in the user's mail app. It has not been sent; they need to review it and press Send."
+          : "The draft is open in the user's mail app with the recipients and subject filled in. The body was too long to pass directly, so it is on their clipboard: tell them to click in the message area and paste, then press Send.";
       },
     },
     {

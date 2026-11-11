@@ -74,8 +74,10 @@ link like a password: anyone who has it can read that calendar.
 
 ## Good to know
 
-- **Not built yet:** sending or reading email, and creating or changing
-  calendar events. Nova will draft text and set reminders instead.
+- **Email:** Nova writes the email and opens it in your mail app (Outlook or
+  Apple Mail) with recipients, subject and body filled in; you review it and
+  press Send. It cannot read your inbox or send on its own yet.
+- **Not built yet:** creating or changing calendar events.
 - Speech recognition is English-only, and the built-in
   voices (Kokoro) are English. If the built-in voice cannot load, replies
   fall back to the system voice.
