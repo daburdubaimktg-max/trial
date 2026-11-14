@@ -73,10 +73,17 @@ test("memory tools save and forget", async () => {
 test("file tools cannot leave the workspace", async () => {
   const { tools, workspace, base } = setup();
   fs.writeFileSync(path.join(workspace, "notes.md"), "hello");
-  fs.symlinkSync(path.join(base, "secret.txt"), path.join(workspace, "link.txt"));
+  const escapes = ["../secret.txt", path.join(base, "secret.txt")];
+  try {
+    fs.symlinkSync(path.join(base, "secret.txt"), path.join(workspace, "link.txt"));
+    escapes.push("link.txt");
+  } catch (err) {
+    // Windows only lets administrators create symlinks; the other cases still run.
+    if (err.code !== "EPERM") throw err;
+  }
 
   assert.equal((await tools.execute("read_file", { path: "notes.md" })).content, "hello");
-  for (const bad of ["../secret.txt", path.join(base, "secret.txt"), "link.txt"]) {
+  for (const bad of escapes) {
     const res = await tools.execute("read_file", { path: bad });
     assert.equal(res.isError, true, bad);
     assert.match(res.content, /outside the workspace/);

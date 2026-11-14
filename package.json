@@ -6,7 +6,8 @@
   "private": true,
   "scripts": {
     "start": "electron .",
-    "test": "node --test"
+    "test": "node --test",
+    "smoke": "electron ."
   },
   "license": "MIT",
   "dependencies": {

@@ -26,8 +26,21 @@ between conversations.
 
 ## Getting started
 
-You need [Node.js](https://nodejs.org) 20 or newer and an
+Nova runs on Windows, macOS and Linux. You need [Node.js](https://nodejs.org)
+20 or newer (install the LTS version) and an
 [Anthropic API key](https://console.anthropic.com/).
+
+**Windows:** download the code as a ZIP, right-click it and choose *Extract
+All*, open the extracted folder and double-click **Start Nova.bat**. If
+Windows shows "Windows protected your PC", click *More info* then *Run
+anyway*. The first time you use the microphone, allow it under Settings →
+Privacy & security → Microphone → *Let desktop apps access your microphone*.
+
+**Mac:** download and unpack the ZIP, then right-click **Start Nova.command**
+and choose *Open* (a plain double-click is blocked the first time because the
+file came from the internet). Allow the microphone when asked.
+
+**Any system, from a terminal** in the project folder:
 
 ```bash
 npm install
@@ -36,6 +49,9 @@ npm install
 ```bash
 npm start
 ```
+
+The launchers run the same two commands. Keep the launcher's window open
+while you use Nova; closing it quits the app.
 
 On first launch the Settings window opens. Paste your API key there (it is
 stored encrypted by your operating system), or set the `ANTHROPIC_API_KEY`

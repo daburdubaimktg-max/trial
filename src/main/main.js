@@ -192,7 +192,37 @@ function startReminders() {
   }, REMINDER_CHECK_MS);
 }
 
+/**
+ * Start-up self-check used by automated builds on Windows, macOS and Linux
+ * (NOVA_SMOKE=1): confirm the window loads and the interface starts, print
+ * the result, and exit.
+ */
+async function runSmokeCheck() {
+  let failure = "";
+  try {
+    const seen = await win.webContents.executeJavaScript(`new Promise((resolve) => setTimeout(() => resolve({
+      name: document.getElementById("brandName").textContent,
+      welcome: Boolean(document.querySelector(".empty")),
+      settingsOpen: document.getElementById("settingsDialog").open,
+      status: document.getElementById("status").textContent,
+    }), 2000))`);
+    console.log("smoke:", JSON.stringify(seen));
+    const expected = store.hasApiKey() === !seen.settingsOpen; // Settings opens only when no key is saved
+    if (seen.name !== store.getSettings().assistantName || !seen.welcome || seen.status !== "Ready" || !expected) {
+      failure = "the interface did not start as expected";
+    }
+  } catch (err) {
+    failure = err.message;
+  }
+  if (failure) console.error("smoke: FAILED:", failure);
+  else console.log("smoke: ok");
+  app.exit(failure ? 1 : 0);
+}
+
 app.whenReady().then(() => {
+  // Windows shows notifications under this id; without it they can be dropped.
+  if (process.platform === "win32") app.setAppUserModelId("com.nova.assistant");
+
   setUp();
 
   // Only the app's own page may use the microphone; nothing else is granted.
@@ -203,6 +233,7 @@ app.whenReady().then(() => {
   registerIpc();
   createWindow();
   startReminders();
+  if (process.env.NOVA_SMOKE) win.webContents.once("did-finish-load", runSmokeCheck);
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

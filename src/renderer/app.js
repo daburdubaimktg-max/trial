@@ -278,6 +278,7 @@ function warmUpSpeech() {
 
 /** Load the neural voice in the background so the first reply isn't delayed. */
 function warmUpVoice() {
+  if (!state.hasApiKey) return; // not set up yet; don't start a download
   if (state.settings.speakReplies && state.settings.voice.startsWith("neural:")) {
     api.loadVoice().catch(() => {}); // a failure is reported when speech is attempted
   }
