@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self' blob:; connect-src 'none'"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Nova</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <aside class="core">
+        <div class="brand"><span id="brandName">Nova</span></div>
+        <button id="orbButton" class="orb-button" aria-label="Talk to the assistant">
+          <canvas id="orb" width="520" height="520"></canvas>
+        </button>
+        <div id="status" class="status" role="status" aria-live="polite">Ready</div>
+        <div id="hint" class="hint">Click the orb, or hold Space, and speak</div>
+
+        <div class="core-actions">
+          <button id="briefButton" class="pill">Brief me</button>
+          <button id="newChatButton" class="pill ghost">New chat</button>
+        </div>
+
+        <label class="toggle">
+          <input type="checkbox" id="wakeToggle" />
+          <span class="track"></span>
+          <span id="wakeLabel">Listen for “Nova”</span>
+        </label>
+        <label class="toggle">
+          <input type="checkbox" id="speakToggle" />
+          <span class="track"></span>
+          <span>Speak replies</span>
+        </label>
+
+        <button id="settingsButton" class="link-button">Settings</button>
+      </aside>
+
+      <main class="chat">
+        <div id="messages" class="messages" aria-live="polite"></div>
+        <form id="composer" class="composer">
+          <textarea id="input" rows="1" placeholder="Ask anything, or give me something to do"></textarea>
+          <button id="sendButton" type="submit" class="send">Send</button>
+        </form>
+      </main>
+
+      <aside class="side">
+        <section>
+          <h2>Today</h2>
+          <div id="agenda" class="list"></div>
+        </section>
+        <section>
+          <h2>Tasks</h2>
+          <div id="tasks" class="list"></div>
+        </section>
+        <section>
+          <h2>Remembered</h2>
+          <div id="memories" class="list"></div>
+        </section>
+      </aside>
+    </div>
+
+    <dialog id="settingsDialog" class="settings">
+      <form id="settingsForm" method="dialog">
+        <h2>Settings</h2>
+
+        <label class="field">
+          <span>Anthropic API key</span>
+          <input id="apiKeyInput" type="password" autocomplete="off" spellcheck="false" />
+          <small id="apiKeyNote"></small>
+        </label>
+
+        <div class="row">
+          <label class="field">
+            <span>Assistant name (also the wake word)</span>
+            <input id="assistantNameInput" type="text" maxlength="24" />
+          </label>
+          <label class="field">
+            <span>Your name</span>
+            <input id="userNameInput" type="text" maxlength="40" />
+          </label>
+        </div>
+
+        <label class="field">
+          <span>Voice</span>
+          <div class="row tight">
+            <select id="voiceSelect"></select>
+            <button id="previewVoiceButton" type="button" class="pill ghost">Play sample</button>
+          </div>
+        </label>
+
+        <div class="row">
+          <label class="field">
+            <span>Speech recognition accuracy</span>
+            <select id="speechModelSelect"></select>
+          </label>
+          <label class="field">
+            <span>Assistant model</span>
+            <select id="brainSelect">
+              <option value="capable">Most capable (Claude Opus 5.5)</option>
+              <option value="fast">Faster replies (Claude Sonnet 5.5)</option>
+            </select>
+          </label>
+        </div>
+
+        <label class="field">
+          <span>Calendar links (private iCal / .ics address, one per line)</span>
+          <textarea id="calendarInput" rows="2" spellcheck="false" placeholder="https://calendar.google.com/calendar/ical/…/basic.ics"></textarea>
+          <small>Read-only. In Google Calendar: Settings → your calendar → “Secret address in iCal format”.</small>
+        </label>
+
+        <label class="field">
+          <span>Workspace folder (the only place files are read or written)</span>
+          <div class="row tight">
+            <input id="workspaceInput" type="text" readonly placeholder="Not set" />
+            <button id="pickWorkspaceButton" type="button" class="pill ghost">Choose…</button>
+          </div>
+        </label>
+
+        <div id="settingsError" class="error" hidden></div>
+        <div class="dialog-actions">
+          <button type="button" id="settingsCancel" class="pill ghost">Cancel</button>
+          <button type="submit" class="pill">Save</button>
+        </div>
+      </form>
+    </dialog>
+
+    <script src="voice-logic.js"></script>
+    <script src="voice.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>

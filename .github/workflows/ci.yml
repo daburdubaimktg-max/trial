@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Unit tests
+        run: npm test
+      # Launch the real app and confirm the window and interface come up.
+      - name: Start the app (Windows, macOS)
+        if: runner.os != 'Linux'
+        run: npm run smoke
+        env:
+          NOVA_SMOKE: "1"
+          NOVA_DATA_DIR: ${{ runner.temp }}/nova-data
+      - name: Start the app (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a npm run smoke -- --no-sandbox
+        env:
+          NOVA_SMOKE: "1"
+          NOVA_DATA_DIR: ${{ runner.temp }}/nova-data

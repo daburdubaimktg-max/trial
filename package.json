@@ -1,0 +1,29 @@
+{
+  "name": "nova-assistant",
+  "version": "0.1.0",
+  "description": "Nova: a voice-first desktop work assistant powered by Claude",
+  "main": "src/main/main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test",
+    "smoke": "electron ."
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.8.0",
+    "@huggingface/transformers": "^3.8.1",
+    "docx": "^9.15.3",
+    "exceljs": "^4.4.0",
+    "jszip": "^3.10.2",
+    "kokoro-js": "^1.2.1",
+    "mammoth": "^1.13.0",
+    "node-ical": "^0.27.6",
+    "pptxgenjs": "^4.0.1",
+    "unpdf": "^1.9.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "electron": "^45.2.3"
+  }
+}
